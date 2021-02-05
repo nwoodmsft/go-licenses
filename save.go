@@ -76,12 +76,14 @@ func saveMain(_ *cobra.Command, args []string) error {
 		return err
 	}
 
+	fmt.Printf("Saving licenses, copyright notices and source code, for package '%v'...\n", args[0])
+
 	classifier, err := licenses.NewClassifier(confidenceThreshold)
 	if err != nil {
 		return err
 	}
 
-	libs, err := licenses.Libraries(context.Background(), classifier, args...)
+	libs, _, err := licenses.Libraries(context.Background(), classifier, args...)
 	if err != nil {
 		return err
 	}

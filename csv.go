@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"fmt"
 	"os"
 	"strings"
 
@@ -28,32 +29,69 @@ import (
 var (
 	csvCmd = &cobra.Command{
 		Use:   "csv <package>",
-		Short: "Prints all licenses that apply to a Go package and its dependencies",
+		Short: "Prints or saves all licenses that apply to a Go package and its dependencies",
 		Args:  cobra.MinimumNArgs(1),
 		RunE:  csvMain,
 	}
 
-	gitRemotes []string
+	gitRemotes          []string
+	csvFileName         string
+	skippedLibsFileName string
 )
 
 func init() {
 	csvCmd.Flags().StringArrayVar(&gitRemotes, "git_remote", []string{"origin", "upstream"}, "Remote Git repositories to try")
+	csvCmd.Flags().StringVar(&csvFileName, "output", "", "Location of a file to save the license information to")
+	csvCmd.Flags().StringVar(&skippedLibsFileName, "skipped_libs_path", "", "Location of a file to save the skipped skipped licenses to")
+
+	if err := csvCmd.MarkFlagFilename("output"); err != nil {
+		glog.Fatal(err)
+	}
+
+	if err := csvCmd.MarkFlagFilename("skipped_libs_path"); err != nil {
+		glog.Fatal(err)
+	}
 
 	rootCmd.AddCommand(csvCmd)
 }
 
 func csvMain(_ *cobra.Command, args []string) error {
-	writer := csv.NewWriter(os.Stdout)
+	var writer *csv.Writer
+	if len(csvFileName) == 0 {
+		writer = csv.NewWriter(os.Stdout)
+	} else {
+		f, err := os.Create(csvFileName)
+		if err != nil {
+			return err
+		}
+		writer = csv.NewWriter(f)
+		defer f.Close()
+	}
+
+	var skippedLibsWriter *csv.Writer
+	if len(skippedLibsFileName) == 0 {
+		skippedLibsWriter = csv.NewWriter(os.Stdout)
+	} else {
+		f, err := os.Create(skippedLibsFileName)
+		if err != nil {
+			return err
+		}
+		skippedLibsWriter = csv.NewWriter(f)
+		defer f.Close()
+	}
+
+	fmt.Printf("Generating CSV file for '%v'...\n", args[0])
 
 	classifier, err := licenses.NewClassifier(confidenceThreshold)
 	if err != nil {
 		return err
 	}
 
-	libs, err := licenses.Libraries(context.Background(), classifier, args...)
+	libs, skippedLibs, err := licenses.Libraries(context.Background(), classifier, args...)
 	if err != nil {
 		return err
 	}
+
 	for _, lib := range libs {
 		licenseURL := "Unknown"
 		licenseName := "Unknown"
@@ -66,8 +104,11 @@ func csvMain(_ *cobra.Command, args []string) error {
 				lURL, err := lib.FileURL(lib.LicensePath)
 				if err != nil {
 					errs = append(errs, err.Error())
-				} else {
+				} else if lURL != nil {
 					licenseURL = lURL.String()
+				} else {
+					licenseURL = "n/a (included in golang)"
+					// else this is a file we can ignore
 				}
 			} else {
 				for _, remote := range gitRemotes {
@@ -81,7 +122,7 @@ func csvMain(_ *cobra.Command, args []string) error {
 				}
 			}
 			if licenseURL == "Unknown" {
-				glog.Errorf("Error discovering URL for %q:\n- %s", lib.LicensePath, strings.Join(errs, "\n- "))
+				glog.Errorf("\nError discovering URL for %q:\n- %s\n\n", lib.LicensePath, strings.Join(errs, "\n- "))
 			}
 			licenseName, _, err = classifier.Identify(lib.LicensePath)
 			if err != nil {
@@ -94,6 +135,16 @@ func csvMain(_ *cobra.Command, args []string) error {
 			return err
 		}
 	}
+
+	for _, lib := range skippedLibs {
+		if err := skippedLibsWriter.Write([]string{lib.PackagePath, lib.Reason}); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("Processed %d Golang licenses. Skipped %d Golang libraries\n", len(libs), len(skippedLibs))
+
+	skippedLibsWriter.Flush()
 	writer.Flush()
 	return writer.Error()
 }

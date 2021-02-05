@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -28,13 +29,10 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-var (
-	// TODO(RJPercival): Support replacing "master" with Go Module version
-	repoPathPrefixes = map[string]string{
-		"github.com":    "blob/master/",
-		"bitbucket.org": "src/master/",
-	}
-)
+type RepoPathFixup struct {
+	newHostName string
+	prefix      string
+}
 
 // Library is a collection of packages covered by the same license file.
 type Library struct {
@@ -43,6 +41,14 @@ type Library struct {
 	// Packages contains import paths for Go packages in this library.
 	// It may not be the complete set of all packages in the library.
 	Packages []string
+}
+
+// SkippedLibrary represents a library which doesn't have a license file.
+type SkippedLibrary struct {
+	// Path to the library that was skipped.
+	PackagePath string
+	// Reason for skipping this library.
+	Reason string
 }
 
 // PackagesError aggregates all Packages[].Errors into a single error.
@@ -65,7 +71,7 @@ func (e PackagesError) Error() string {
 // A library is a collection of one or more packages covered by the same license file.
 // Packages not covered by a license will be returned as individual libraries.
 // Standard library packages will be ignored.
-func Libraries(ctx context.Context, classifier Classifier, importPaths ...string) ([]*Library, error) {
+func Libraries(ctx context.Context, classifier Classifier, importPaths ...string) ([]*Library, []*SkippedLibrary, error) {
 	cfg := &packages.Config{
 		Context: ctx,
 		Mode:    packages.NeedImports | packages.NeedDeps | packages.NeedFiles | packages.NeedName,
@@ -73,9 +79,10 @@ func Libraries(ctx context.Context, classifier Classifier, importPaths ...string
 
 	rootPkgs, err := packages.Load(cfg, importPaths...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	var skippedLibraries []*SkippedLibrary
 	pkgs := map[string]*packages.Package{}
 	pkgsByLicense := make(map[string][]*packages.Package)
 	errorOccurred := false
@@ -86,10 +93,12 @@ func Libraries(ctx context.Context, classifier Classifier, importPaths ...string
 		}
 		if isStdLib(p) {
 			// No license requirements for the Go standard library.
+			skippedLibraries = append(skippedLibraries, &SkippedLibrary{PackagePath: p.PkgPath, Reason: "Go standard library that doesn't have any license requirement"})
 			return false
 		}
 		if len(p.OtherFiles) > 0 {
-			glog.Warningf("%q contains non-Go code that can't be inspected for further dependencies:\n%s", p.PkgPath, strings.Join(p.OtherFiles, "\n"))
+			skippedLibraries = append(skippedLibraries, &SkippedLibrary{PackagePath: p.PkgPath, Reason: fmt.Sprintf("Contains non-Go code that can't be inspected for further dependencies: %s", strings.Join(p.OtherFiles, ", "))})
+			//glog.Warningf("%q contains non-Go code that can't be inspected for further dependencies:\n%s", p.PkgPath, strings.Join(p.OtherFiles, "\n"))
 		}
 		var pkgDir string
 		switch {
@@ -105,14 +114,16 @@ func Libraries(ctx context.Context, classifier Classifier, importPaths ...string
 		}
 		licensePath, err := Find(pkgDir, classifier)
 		if err != nil {
+			skippedLibraries = append(skippedLibraries, &SkippedLibrary{PackagePath: p.PkgPath, Reason: fmt.Sprintf("Failed to find license for %s: %v", p.PkgPath, err)})
 			glog.Errorf("Failed to find license for %s: %v", p.PkgPath, err)
 		}
 		pkgs[p.PkgPath] = p
 		pkgsByLicense[licensePath] = append(pkgsByLicense[licensePath], p)
 		return true
 	}, nil)
+
 	if errorOccurred {
-		return nil, PackagesError{
+		return nil, nil, PackagesError{
 			pkgs: rootPkgs,
 		}
 	}
@@ -136,7 +147,7 @@ func Libraries(ctx context.Context, classifier Classifier, importPaths ...string
 		}
 		libraries = append(libraries, lib)
 	}
-	return libraries, nil
+	return libraries, skippedLibraries, nil
 }
 
 // Name is the common prefix of the import paths for all of the packages in this library.
@@ -169,30 +180,200 @@ func (l *Library) String() string {
 	return l.Name()
 }
 
+// Golang project may end with a versioned path name (typically "/v2", "/v3", ...)
+// The path to the license doesn't bear this versioned part, so it must be removed.
+func (l *Library) tryRemoveVersionedName(input string) string {
+	re := regexp.MustCompile(`/v\d+$`)
+	input = strings.TrimSuffix(input, string(re.Find([]byte(input))))
+
+	re = regexp.MustCompile(`^v\d+$`)
+	return strings.TrimSuffix(input, string(re.Find([]byte(input))))
+}
+
+// The original file path may not exactly represent the actual URL to the LICENSE
+// There is also a wide variety of fixups possible (each with slight differences)
+// Paths must be therefore fixed up accordingly
+func (l *Library) fixupFilePath(filePath string) (string, string, error) {
+	relFilePath, err := filepath.Rel(filepath.Dir(l.LicensePath), filePath)
+	if err != nil {
+		return "", "", err
+	}
+
+	hostName := ""
+	nameParts := strings.SplitN(l.Name(), "/", 2)
+	if len(nameParts) > 0 {
+		hostName = nameParts[0]
+	}
+
+	// TODO(RJPercival): Support replacing "master" with Go Module version
+	switch hostName {
+	case "github.com":
+		nameParts = strings.SplitN(nameParts[1], "/", 3)
+		if len(nameParts) < 2 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		user, project := nameParts[0], nameParts[1]
+		prefix := "blob/master/"
+		if len(nameParts) == 3 {
+			prefix = l.tryRemoveVersionedName(path.Join(prefix, nameParts[2]))
+		}
+
+		return "github.com", path.Join(user, project, prefix, relFilePath), nil
+	case "bitbucket.org":
+		nameParts = strings.SplitN(nameParts[1], "/", 3)
+		if len(nameParts) < 2 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		user, project := nameParts[0], nameParts[1]
+		prefix := "src/master/"
+		if len(nameParts) == 3 {
+			prefix = l.tryRemoveVersionedName(path.Join(prefix, nameParts[2]))
+		}
+
+		return "bitbucket.org", path.Join(user, project, prefix, relFilePath), nil
+	case "k8s.io":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+		suffix := ""
+		if len(nameParts) == 2 {
+			suffix = l.tryRemoveVersionedName(nameParts[1])
+		}
+
+		return "github.com", path.Join("kubernetes", project, prefix, suffix, relFilePath), nil
+	case "sigs.k8s.io":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+		suffix := ""
+		if len(nameParts) == 2 {
+			suffix = l.tryRemoveVersionedName(nameParts[1])
+		}
+
+		return "github.com", path.Join("kubernetes-sigs", project, prefix, suffix, relFilePath), nil
+	case "gomodules.xyz":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+		suffix := ""
+		if len(nameParts) == 2 {
+			suffix = l.tryRemoveVersionedName(nameParts[1])
+		}
+
+		return "github.com", path.Join("gomodules", project, prefix, suffix, relFilePath), nil
+	case "go.uber.org":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+		suffix := ""
+		if len(nameParts) == 2 {
+			suffix = l.tryRemoveVersionedName(nameParts[1])
+		}
+
+		return "github.com", path.Join("uber-go", project, prefix, suffix, relFilePath), nil
+	case "go.etcd.io":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+		suffix := ""
+		if len(nameParts) == 2 {
+			suffix = l.tryRemoveVersionedName(nameParts[1])
+		}
+
+		return "github.com", path.Join("etcd-io", project, prefix, suffix, relFilePath), nil
+	case "msazure.visualstudio.com":
+		nameParts = strings.SplitN(nameParts[1], "/", 3)
+		if len(nameParts) < 2 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[1]
+		prefix := "_git/"
+		suffix := ""
+		if len(nameParts) == 3 {
+			suffix = l.tryRemoveVersionedName(nameParts[2])
+			suffix = strings.TrimSuffix(suffix, ".git")
+		}
+		suffix = strings.Join([]string{suffix, "?path=", relFilePath}, "")
+
+		// "https://msazure.visualstudio.com/msk8s/_git/cloud-operator?path=LICENSE
+		return "msazure.visualstudio.com", path.Join(project, prefix, suffix), nil
+	case "cloud.google.com":
+		// Main site for cloud.google.com: https://pkg.go.dev/cloud.google.com/go/compute/metadata
+		return "github.com", "googleapis/google-cloud-go/LICENSE", nil
+	case "helm.sh":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+
+		return "github.com", path.Join("helm", project, prefix, relFilePath), nil
+	case "software.sslmate.com":
+		nameParts = strings.SplitN(nameParts[1], "/", 3)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[1]
+		prefix := "blob/master/"
+		suffix := ""
+		if len(nameParts) == 3 {
+			suffix = l.tryRemoveVersionedName(nameParts[2])
+		}
+		return "github.com", path.Join("SSLMate", project, prefix, suffix, relFilePath), nil
+	case "gopkg.in":
+		// Main site for gopkg.in is: https://labix.org/gopkg.in, the license points to https://github.com/niemeyer/gopkg/blob/master/LICENSE
+		return "github.com", "niemeyer/gopkg/blob/master/LICENSE", nil
+	case "go.opencensus.io":
+		licensePath := strings.Join([]string{l.Name(), "?tab=licenses"}, "")
+		return "pkg.go.dev", licensePath, nil
+	case "contrib.go.opencensus.io":
+		licensePath := strings.Join([]string{l.Name(), "?tab=licenses"}, "")
+		glog.Errorf("contrib.go.opencensus.io [http://pkg.go.dev/%v] for %v", licensePath, l.Name())
+		return "pkg.go.dev", licensePath, nil
+	case "google.golang.org":
+		fallthrough
+	case "golang.org":
+		return "", "", nil // Ignore golang packages
+	}
+
+	return "", "", fmt.Errorf("unsupported package host %q for %q", hostName, l.Name())
+}
+
 // FileURL attempts to determine the URL for a file in this library.
 // This only works for certain supported package prefixes, such as github.com,
 // bitbucket.org and googlesource.com. Prefer GitRepo.FileURL() if possible.
 func (l *Library) FileURL(filePath string) (*url.URL, error) {
-	relFilePath, err := filepath.Rel(filepath.Dir(l.LicensePath), filePath)
+
+	hostname, path, err := l.fixupFilePath(filePath)
 	if err != nil {
+		glog.Errorf("package host error [%v] for %v", err, l.Name())
 		return nil, err
 	}
-	nameParts := strings.SplitN(l.Name(), "/", 4)
-	if len(nameParts) < 3 {
-		return nil, fmt.Errorf("cannot determine URL for %q package", l.Name())
+
+	if len(hostname) == 0 { // This happens for golang packages. These packages come without a separate license
+		return nil, nil
 	}
-	host, user, project := nameParts[0], nameParts[1], nameParts[2]
-	pathPrefix, ok := repoPathPrefixes[host]
-	if !ok {
-		return nil, fmt.Errorf("unsupported package host %q for %q", host, l.Name())
-	}
-	if len(nameParts) == 4 {
-		pathPrefix = path.Join(pathPrefix, nameParts[3])
-	}
+
 	return &url.URL{
 		Scheme: "https",
-		Host:   host,
-		Path:   path.Join(user, project, pathPrefix, relFilePath),
+		Host:   hostname,
+		Path:   path,
 	}, nil
 }
 
@@ -201,5 +382,9 @@ func isStdLib(pkg *packages.Package) bool {
 	if len(pkg.GoFiles) == 0 {
 		return false
 	}
-	return strings.HasPrefix(pkg.GoFiles[0], build.Default.GOROOT)
+	goroot := build.Default.GOROOT
+	if !strings.HasSuffix(goroot, "/") {
+		goroot += "/"
+	}
+	return strings.HasPrefix(pkg.GoFiles[0], goroot)
 }
