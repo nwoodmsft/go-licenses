@@ -55,6 +55,7 @@ func findUpwards(dir string, r *regexp.Regexp, stopAt []*regexp.Regexp, predicat
 		return "", err
 	}
 	start := dir
+	globalErr := fmt.Errorf("no file/directory matching regexp %q found for %s", r, start)
 	// Stop once dir matches a stopAt regexp or dir is the filesystem root
 	for !matchAny(stopAt, dir) {
 		dirContents, err := ioutil.ReadDir(dir)
@@ -65,6 +66,7 @@ func findUpwards(dir string, r *regexp.Regexp, stopAt []*regexp.Regexp, predicat
 			if r.MatchString(f.Name()) {
 				path := filepath.Join(dir, f.Name())
 				if predicate != nil && !predicate(path) {
+					globalErr = fmt.Errorf("'%s/%s' is not a valid license", start, f.Name())
 					continue
 				}
 				return path, nil
@@ -77,7 +79,7 @@ func findUpwards(dir string, r *regexp.Regexp, stopAt []*regexp.Regexp, predicat
 		}
 		dir = parent
 	}
-	return "", fmt.Errorf("no file/directory matching regexp %q found for %s", r, start)
+	return "", globalErr
 }
 
 func matchAny(patterns []*regexp.Regexp, s string) bool {

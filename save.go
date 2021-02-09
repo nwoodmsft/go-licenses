@@ -112,7 +112,8 @@ func saveMain(_ *cobra.Command, args []string) error {
 		}
 	}
 	if len(libsWithBadLicenses) > 0 {
-		return fmt.Errorf("one or more libraries have an incompatible/unknown license: %q", libsWithBadLicenses)
+		glog.Errorf("one or more libraries have an incompatible/unknown license: %q", libsWithBadLicenses)
+		return nil
 	}
 	return nil
 }

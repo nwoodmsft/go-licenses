@@ -344,7 +344,9 @@ func (l *Library) fixupFilePath(filePath string) (string, string, error) {
 		return "pkg.go.dev", licensePath, nil
 	case "contrib.go.opencensus.io":
 		licensePath := strings.Join([]string{l.Name(), "?tab=licenses"}, "")
-		glog.Errorf("contrib.go.opencensus.io [http://pkg.go.dev/%v] for %v", licensePath, l.Name())
+		return "pkg.go.dev", licensePath, nil
+	case "golang.zx2c4.com":
+		licensePath := strings.Join([]string{l.Name(), "?tab=licenses"}, "")
 		return "pkg.go.dev", licensePath, nil
 	case "google.golang.org":
 		fallthrough
