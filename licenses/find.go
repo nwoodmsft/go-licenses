@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	licenseRegexp = regexp.MustCompile(`^(?i)(LICEN(S|C)E|COPYING|README|NOTICE|LICENSE-APACHE-2.0)(\..+)?$`)
+	licenseRegexp = regexp.MustCompile(`^(?i)(LICEN(S|C)E|UNLICENSE|COPYING|README|NOTICE|LICENSE-APACHE-2.0)(\..+)?$`)
 	srcDirRegexps = func() []*regexp.Regexp {
 		var rs []*regexp.Regexp
 		for _, s := range build.Default.SrcDirs() {
