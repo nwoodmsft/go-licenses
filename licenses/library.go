@@ -219,6 +219,15 @@ func (l *Library) fixupFilePath(filePath string) (string, string, error) {
 		}
 
 		return "github.com", path.Join(user, project, prefix, relFilePath), nil
+	case "gitlab.com":
+		nameParts = strings.SplitN(nameParts[1], "/", 3)
+		if len(nameParts) < 2 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		user, project := nameParts[0], nameParts[1]
+		suffix := "-/raw/master/"
+
+		return "gitlab.com", path.Join(user, project, suffix, relFilePath), nil
 	case "bitbucket.org":
 		nameParts = strings.SplitN(nameParts[1], "/", 3)
 		if len(nameParts) < 2 {
@@ -354,7 +363,7 @@ func (l *Library) fixupFilePath(filePath string) (string, string, error) {
 		return "", "", nil // Ignore golang packages
 	}
 
-	return "", "", fmt.Errorf("unsupported package host %q for %q", hostName, l.Name())
+	return "", "", fmt.Errorf("unsupported package host %q for %q. FilePath: '%v'", hostName, l.Name(), relFilePath)
 }
 
 // FileURL attempts to determine the URL for a file in this library.
