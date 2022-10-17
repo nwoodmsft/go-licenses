@@ -16,7 +16,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -146,7 +148,10 @@ func copyNotices(licensePath, dest string) error {
 	for _, f := range files {
 		if fName := f.Name(); !f.IsDir() && noticeRegexp.MatchString(fName) {
 			if err := copy.Copy(filepath.Join(src, fName), filepath.Join(dest, fName)); err != nil {
-				return err
+				// Workaround for unexpected permission error returned by io.Create (seems to be a noop as file is created succesfully and has expected content)
+				if !errors.Is(err, fs.ErrPermission) {
+					return err
+				}
 			}
 		}
 	}
