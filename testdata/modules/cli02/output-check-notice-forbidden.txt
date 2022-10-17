@@ -1,5 +1,5 @@
 Notice license type BSD-3-Clause found for library github.com/fsnotify/fsnotify
-Notice license type Apache-2.0 found for library github.com/google/go-licenses/testdata/modules/cli02
+Notice license type Apache-2.0 found for library github.com/nwoodmsft/go-licenses/testdata/modules/cli02
 Notice license type BSD-2-Clause found for library github.com/magiconair/properties
 Notice license type MIT found for library github.com/mitchellh/go-homedir
 Notice license type MIT found for library github.com/mitchellh/mapstructure

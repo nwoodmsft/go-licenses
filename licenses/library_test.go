@@ -46,39 +46,39 @@ func TestLibraries(t *testing.T) {
 	}{
 		{
 			desc:       "Detects direct dependency",
-			importPath: "github.com/google/go-licenses/licenses/testdata/direct",
+			importPath: "github.com/nwoodmsft/go-licenses/licenses/testdata/direct",
 			wantLibs: []string{
-				"github.com/google/go-licenses/licenses/testdata/direct",
-				"github.com/google/go-licenses/licenses/testdata/indirect",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/direct",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/indirect",
 			},
 		},
 		{
 			desc:       "Detects transitive dependency",
-			importPath: "github.com/google/go-licenses/licenses/testdata",
+			importPath: "github.com/nwoodmsft/go-licenses/licenses/testdata",
 			wantLibs: []string{
-				"github.com/google/go-licenses/licenses/testdata",
-				"github.com/google/go-licenses/licenses/testdata/direct",
-				"github.com/google/go-licenses/licenses/testdata/indirect",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/direct",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/indirect",
 			},
 		},
 		{
 			desc:       "Ignores a package path",
-			importPath: "github.com/google/go-licenses/licenses/testdata",
+			importPath: "github.com/nwoodmsft/go-licenses/licenses/testdata",
 			ignore: []string{
-				"github.com/google/go-licenses/licenses/testdata/direct",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/direct",
 			},
 			wantLibs: []string{
-				"github.com/google/go-licenses/licenses/testdata",
-				"github.com/google/go-licenses/licenses/testdata/indirect",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/indirect",
 			},
 		},
 		{
 			desc:       "Build tagged package",
-			importPath: "github.com/google/go-licenses/licenses/testdata/tags",
+			importPath: "github.com/nwoodmsft/go-licenses/licenses/testdata/tags",
 			goflags:    "-tags=tags",
 			wantLibs: []string{
-				"github.com/google/go-licenses/licenses/testdata/tags",
-				"github.com/google/go-licenses/licenses/testdata/indirect",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/tags",
+				"github.com/nwoodmsft/go-licenses/licenses/testdata/indirect",
 			},
 		},
 	} {
