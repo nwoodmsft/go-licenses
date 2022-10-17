@@ -14,7 +14,7 @@ To download and install this tool, make sure
 following command:
 
 ```shell
-$ go get github.com/jocelynberrendonner/go-licenses
+$ go get github.com/nwoodmsft/go-licenses
 ```
 
 ## Reports

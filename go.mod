@@ -1,4 +1,4 @@
-module github.com/jocelynberrendonner/go-licenses
+module github.com/nwoodmsft/go-licenses
 
 go 1.13
 
