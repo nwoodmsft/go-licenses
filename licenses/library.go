@@ -321,6 +321,41 @@ func (l *Library) fixupFilePath(filePath string) (string, string, error) {
 
 		// "https://msazure.visualstudio.com/msk8s/_git/cloud-operator?path=LICENSE
 		return "msazure.visualstudio.com", path.Join(project, prefix, suffix), nil
+	case "dev.azure.com":
+		nameParts = strings.SplitN(nameParts[1], "/", 3)
+		if len(nameParts) < 2 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[1]
+		prefix := "_git/"
+		suffix := ""
+		if len(nameParts) == 3 {
+			suffix = l.tryRemoveVersionedName(nameParts[2])
+			suffix = strings.TrimSuffix(suffix, ".git")
+		}
+		suffix = strings.Join([]string{suffix, "?path=", relFilePath}, "")
+
+		return "dev.azure.com", path.Join(project, prefix, suffix), nil
+	case "kubevirt.io":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+
+		return "github.com", path.Join("kubevirt", project, prefix, relFilePath), nil
+	case "code.cloudfoundry.org":
+		nameParts = strings.SplitN(nameParts[1], "/", 2)
+		if len(nameParts) < 1 {
+			return "", "", fmt.Errorf("cannot determine URL for %q package", l.Name())
+		}
+		project := nameParts[0]
+		prefix := "blob/master/"
+
+		return "github.com", path.Join("cloudfoundry", project, prefix, relFilePath), nil
+	case "go.starlark.net":
+		return "github.com", "github.com/google/starlark-go/LICENSE", nil
 	case "cloud.google.com":
 		// Main site for cloud.google.com: https://pkg.go.dev/cloud.google.com/go/compute/metadata
 		return "github.com", "googleapis/google-cloud-go/LICENSE", nil
