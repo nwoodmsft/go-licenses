@@ -141,7 +141,9 @@ func copyNotices(licensePath, dest string) error {
 	for _, f := range files {
 		if fName := f.Name(); !f.IsDir() && noticeRegexp.MatchString(fName) {
 			if err := copy.Copy(filepath.Join(src, fName), filepath.Join(dest, fName)); err != nil {
-				return err
+				if !os.IsPermission(err) {
+					return err
+				}
 			}
 		}
 	}
