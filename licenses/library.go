@@ -354,6 +354,9 @@ func (l *Library) fixupFilePath(filePath string) (string, string, error) {
 		prefix := "blob/master/"
 
 		return "github.com", path.Join("cloudfoundry", project, prefix, relFilePath), nil
+	case "go.opentelemetry.io":
+		licensePath := strings.Join([]string{l.Name(), "?tab=licenses"}, "")
+		return "pkg.go.dev", licensePath, nil
 	case "go.starlark.net":
 		return "github.com", "github.com/google/starlark-go/LICENSE", nil
 	case "cloud.google.com":
